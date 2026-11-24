@@ -13,7 +13,7 @@ Description: Calculates planetary day and hour rulers from timestamps,
     into twelve intervals each using calculated sunrise and sunset times.
     Provides functions for generating schedules and adding planetary
     classifications to timestamped datasets.
-License: CC0
+License: MIT + file LICENSE
 Encoding: UTF-8
 Imports:
     clock (>= 0.7.0),
