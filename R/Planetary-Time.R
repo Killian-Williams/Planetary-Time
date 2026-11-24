@@ -71,13 +71,47 @@ chaldean_order <- c("Saturn", "Jupiter", "Mars", "Sun", "Venus", "Mercury", "Moo
   )
 }
 
-# Produce the complete 24-hour timetable for a local planetary date.
-# The timetable starts at that date's sunrise and ends at next sunrise.
+#' Generate a planetary day's 24 intervals
+#'
+#' Divide sunrise to sunset and sunset to the following sunrise into twelve
+#' equal elapsed-time intervals each. Solar events come from `suncalc`.
+#' @param date One `Date` or a date string in `YYYY-MM-DD` format, interpreted
+#'   as a calendar date at the target location.
+#' @param timezone One IANA time zone name, such as `Africa/Nairobi`.
+#' @param latitude One finite latitude in degrees, between -90 and 90.
+#' @param longitude One finite longitude in degrees, between -180 and 180;
+#'   east is positive.
+#' @return A 24-row data frame with `planetary_date` (`Date`), `day_ruler`,
+#'   `planetary_hour` (1 to 24), `period` (`Day` or `Night`), `hour_ruler`,
+#'   `hour_start` and `hour_end` (`POSIXct` in `timezone`), and
+#'   `duration_minutes` (elapsed minutes).
+#' @details Intervals include their start and exclude their end. The first
+#'   hour's ruler is the weekday ruler; subsequent rulers follow Saturn,
+#'   Jupiter, Mars, Sun, Venus, Mercury, Moon. A planetary day starts at sunrise.
+#'   Durations use elapsed seconds, including across daylight-saving changes.
+#'   An error is raised if consecutive sunrises or the intervening sunset are
+#'   unavailable or not unique (for example, during polar day or night).
+#'   Solar times are approximate, assume an unobstructed horizon, and do not
+#'   account for local weather or terrain. No universal accuracy is guaranteed.
+#' @examples
+#' schedule <- planetary_schedule("2026-10-08", "Africa/Nairobi", -1.2921, 36.8219)
+#' head(schedule)
+#' @seealso [planetary_hours()], [add_planetary_info()]
 #' @export
 planetary_schedule <- function(date, timezone, latitude, longitude) {
   .check_location(timezone, latitude, longitude)
-  date <- as.Date(date)
-  if (length(date) != 1L || is.na(date)) stop("Supply one valid date: YYYY-MM-DD.")
+  if (length(date) != 1L || is.na(date) ||
+      !(inherits(date, "Date") || is.character(date))) {
+    stop("Supply one valid date: YYYY-MM-DD.")
+  }
+  if (is.character(date)) {
+    parsed <- suppressWarnings(as.Date(date, format = "%Y-%m-%d"))
+    if (is.na(parsed) || format(parsed, "%Y-%m-%d") != date) {
+      stop("Supply one valid date: YYYY-MM-DD.")
+    }
+    date <- parsed
+  }
+  if (!is.finite(as.numeric(date))) stop("Supply one valid date: YYYY-MM-DD.")
   solar <- .solar_events(date, timezone, latitude, longitude)
   .make_schedule(date, timezone, solar$sunrise, solar$sunset, solar$next_sunrise)
 }
@@ -85,8 +119,8 @@ planetary_schedule <- function(date, timezone, latitude, longitude) {
 .parse_timestamp <- function(timestamp, source_timezone) {
   # POSIXct already describes an instant. Never reinterpret its clock reading.
   if (inherits(timestamp, "POSIXt")) return(as.POSIXct(timestamp))
-  if (!is.character(timestamp)) stop("Use timestamp text or a POSIXct object.")
   if (is.na(timestamp)) return(as.POSIXct(NA_real_, origin = "1970-01-01", tz = "UTC"))
+  if (!is.character(timestamp)) stop("Use timestamp text or a POSIXct object.")
   if (!requireNamespace("clock", quietly = TRUE)) {
     stop('Install clock first: install.packages("clock")')
   }
@@ -105,10 +139,39 @@ planetary_schedule <- function(date, timezone, latitude, longitude) {
   value
 }
 
-# Find rulers for one timestamp or a vector of timestamps at ONE location.
-# source_timezone: where the input clock readings were recorded.
-# timezone: where the planetary hours are being calculated.
-# For different locations, call this function separately for each location.
+#' Classify timestamps by planetary day and hour
+#'
+#' Find the sunrise-based planetary date and interval for each timestamp at
+#' one geographic location. Before sunrise, the previous planetary day applies.
+#' @param timestamp A nonempty vector of local timestamp strings in
+#'   `YYYY-MM-DD HH:MM[:SS]` format, or `POSIXct`/`POSIXlt` instants.
+#'   With `time`, supply dates instead. Missing timestamps produce missing rows.
+#' @param time Optional clock strings in `HH:MM[:SS]` format, of length one
+#'   or the same length as `timestamp`.
+#' @inheritParams planetary_schedule
+#' @param source_timezone IANA zone for input strings, defaulting to `timezone`.
+#'   Already parsed `POSIXt` values retain their instants, regardless of this zone.
+#' @param on_error `"stop"` to stop on an invalid timestamp or unavailable solar
+#'   events; `"NA"` to return a missing result with the error in `status`.
+#'   Invalid shared location or zone arguments always raise an error.
+#' @return A data frame with one row per timestamp, in input order. Columns are
+#'   `timestamp_utc` (`POSIXct`), `local_time` (formatted text with zone
+#'   abbreviation), `timezone`, the eight schedule columns described in
+#'   [planetary_schedule()], and `status` (`"OK"`, `"Missing timestamp"`, or an
+#'   error message). Failed rows have missing result fields except `timezone`
+#'   and `status`.
+#' @details Intervals are start-inclusive and end-exclusive. Exact sunset begins
+#'   hour 13; exact sunrise begins hour 1 of the new planetary day. Ambiguous
+#'   fall-back and nonexistent spring-forward clock strings are rejected;
+#'   pass a `POSIXct` instant to distinguish repeated clock times. Leap seconds
+#'   are not supported. Solar-model limitations are described in
+#'   [planetary_schedule()].
+#' @examples
+#' planetary_hours(c("2026-10-08 14:30:00", NA), timezone = "Africa/Nairobi",
+#'                 latitude = -1.2921, longitude = 36.8219)
+#' planetary_hours("2026-10-08", time = "14:30", timezone = "Africa/Nairobi",
+#'                 latitude = -1.2921, longitude = 36.8219)
+#' @seealso [planetary_schedule()], [add_planetary_info()]
 #' @export
 planetary_hours <- function(timestamp, time = NULL, timezone,
                             latitude, longitude, source_timezone = timezone,
@@ -174,13 +237,31 @@ planetary_hours <- function(timestamp, time = NULL, timezone,
   result
 }
 
-# Attach ruler columns to any data frame containing a timestamp column.
+#' Add planetary classifications to a dataset
+#'
+#' Append planetary information to every row of a data frame at one location.
+#' Original columns and row order are retained.
+#' @param data A nonempty data frame.
+#' @param timestamp_column Name of the existing timestamp column. Its values
+#'   must follow the `timestamp` contract in [planetary_hours()].
+#' @inheritParams planetary_hours
+#' @return The input data frame with all columns from [planetary_hours()]
+#'   appended. Existing names must not collide with any output column name.
+#' @details Unlike [planetary_hours()], the default `on_error = "NA"` retains
+#'   invalid rows and records the reason in `status`. Shared argument errors
+#'   still stop the call. For multiple locations, call separately for each group.
+#' @examples
+#' observations <- data.frame(recorded_at = c("2026-10-08 14:30:00", NA),
+#'                            value = c(10, 12))
+#' add_planetary_info(observations, "recorded_at", "Africa/Nairobi", -1.2921, 36.8219)
+#' @seealso [planetary_hours()], [planetary_schedule()]
 #' @export
 add_planetary_info <- function(data, timestamp_column, timezone,
                                latitude, longitude, source_timezone = timezone,
                                on_error = "NA") {
   if (!is.data.frame(data)) stop("data must be a data frame.")
   if (!is.character(timestamp_column) || length(timestamp_column) != 1L ||
+      is.na(timestamp_column) ||
       !timestamp_column %in% names(data)) stop("Choose an existing timestamp column.")
   if (!nrow(data)) stop("The data frame has no rows.")
   info <- planetary_hours(data[[timestamp_column]], timezone = timezone,

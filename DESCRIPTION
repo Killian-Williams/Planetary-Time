@@ -1,6 +1,6 @@
-Package: PlanteryTime
+Package: PlanetaryTime
 Title: Calculate Location-Based Planetary Days and Hours
-Version: 0.0.0.9000
+Version: 0.1.0
 Authors@R: 
     person(
         given = "Killian",
@@ -16,9 +16,14 @@ Description: Calculates planetary day and hour rulers from timestamps,
 License: CC0
 Encoding: UTF-8
 Imports:
-    clock,
-    suncalc
-URL: https://github.com/nicecooldude12/Planetary-Time
-BugReports: https://github.com/nicecooldude12/Planetary-Time/issues
+    clock (>= 0.7.0),
+    suncalc (>= 0.5.1)
+Suggests:
+    testthat (>= 3.0.0),
+    roxygen2
+Config/testthat/edition: 3
+Depends: R (>= 4.1.0)
+URL: https://github.com/Killian-Williams/Planetary-Time
+BugReports: https://github.com/Killian-Williams/Planetary-Time/issues
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.3
+Config/roxygen2/version: 8.1.1
