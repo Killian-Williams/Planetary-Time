@@ -1,0 +1,66 @@
+name: R-CMD-check
+on:
+  push:
+    branches: [main, release-readiness]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      R_KEEP_PKG_SOURCE: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::rcmdcheck
+          needs: check
+      - name: Run correctness tests
+        shell: Rscript {0}
+        run: testthat::test_local(stop_on_failure = TRUE)
+      - uses: r-lib/actions/check-r-package@v2
+        with:
+          args: 'c("--no-manual", "--as-cran")'
+          error-on: '"warning"'
+          upload-results: always
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::rcmdcheck
+          needs: check
+      - name: Verify release version and build archive
+        shell: Rscript {0}
+        run: |
+          version <- read.dcf("DESCRIPTION")[1, "Version"]
+          stopifnot(Sys.getenv("GITHUB_REF_NAME") == paste0("v", version))
+          status <- system2(file.path(R.home("bin"), "R"), c("CMD", "build", "."))
+          stopifnot(status == 0L)
+          archive <- paste0("PlanetaryTime_", version, ".tar.gz")
+          Sys.setenv("_R_CHECK_CRAN_INCOMING_" = "false")
+          rcmdcheck::rcmdcheck(archive, args = c("--no-manual", "--as-cran"),
+                              error_on = "warning", check_dir = "release-check")
+      - name: Publish checked source archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" PlanetaryTime_*.tar.gz --verify-tag --title "PlanetaryTime $GITHUB_REF_NAME" --notes-file NEWS.md

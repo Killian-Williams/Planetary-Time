@@ -1,0 +1,12 @@
+^.*\.Rproj$
+^\.Rproj\.user$
+^\.github$
+^\.git$
+^\.gitignore$
+^\.gitattributes$
+^tools$
+^RELEASE-CHECKLIST\.md$
+^LICENSE\.md$
+^release-check$
+^.*\.Rcheck$
+^.*\.tar\.gz$
